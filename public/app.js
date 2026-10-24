@@ -156,6 +156,7 @@ function xhrUpload(url, fd, onProgress) {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
     x.open('POST', url);
+    x.withCredentials = true;
     x.responseType = 'json';
     x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     x.onload = () => {
@@ -168,6 +169,32 @@ function xhrUpload(url, fd, onProgress) {
 }
 const checkImage = (f) => (!/^image\//.test(f.type) ? `${f.name} is not an image` : f.size > 30 * 1024 * 1024 ? `${f.name} is over 30 MB` : '');
 const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+async function compressImageForUpload(file) {
+  if (!file.type || !file.type.startsWith('image/') || file.size < 600 * 1024) return file;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      const maxDim = 2000;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim; }
+        else { width = Math.round((width * maxDim) / height); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size >= file.size) return resolve(file);
+        resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 // ---------- theme ----------
 const root = document.documentElement;
@@ -573,7 +600,10 @@ async function uploadModal(bookId) {
     if (!st.validate()) return;
     const bid = $('#ub', d).value;
     const fd = new FormData();
-    items.forEach((it) => fd.append('images', it.out, it.out.name || it.file.name));
+    for (const it of items) {
+      const fileToUpload = await compressImageForUpload(it.out || it.file);
+      fd.append('images', fileToUpload, fileToUpload.name || it.file.name);
+    }
     if ($('#up', d).value && items.length === 1) fd.append('page', $('#up', d).value);
     const btn = $('#sv', d), bar = $('#pg', d);
     btn.disabled = true; bar.hidden = false;

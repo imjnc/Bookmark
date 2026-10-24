@@ -31,12 +31,27 @@ app.use((err, _req, res, _next) => { console.error(err); bad(res, err.message ||
 
 export default app;
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-if (isMain && !process.env.VERCEL) {
-  const port = Number(process.env.PORT) || 3000;
-  const server = app.listen(port, () => {
-    console.log(`Bookmark running at http://localhost:${port}`);
-    resumePending();
-  });
-  process.on('SIGINT', async () => { await shutdownOcr(); server.close(); process.exit(0); });
+const isMain = !process.env.VERCEL && process.argv[1] && (
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) ||
+  process.argv[1].endsWith('server' + path.sep + 'index.js') ||
+  process.argv[1].endsWith('server/index.js')
+);
+
+if (isMain) {
+  const start = (p) => {
+    const s = app.listen(p, () => {
+      console.log(`Bookmark running at http://localhost:${p}`);
+      resumePending();
+    });
+    s.on('error', (err) => {
+      if (err.code === 'EADDRINUSE' && !process.env.PORT && p < 3010) {
+        console.log(`Port ${p} in use, trying http://localhost:${p + 1}...`);
+        start(p + 1);
+      } else {
+        console.error(err);
+      }
+    });
+    process.on('SIGINT', async () => { await shutdownOcr(); s.close(); process.exit(0); });
+  };
+  start(Number(process.env.PORT) || 3000);
 }

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { db, DATA_DIR, UPLOAD_DIR, ftsPut, ftsDelete } from './db.js';
 import { requireUser } from './auth.js';
-import { enqueue } from './ocr.js';
+import { enqueue, processImage } from './ocr.js';
 import { lookupBooks } from './metadata.js';
 import { embed, toBlob } from './embed.js';
 import { ok, bad, rm } from './util.js';
@@ -25,6 +25,7 @@ const upload = multer({
 });
 
 const ownBook = (id, uid) => db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(id, uid);
+const ensureBook = (id, uid) => ownBook(id, uid) || (process.env.VERCEL ? (db.prepare("INSERT OR IGNORE INTO books (id, user_id, title) VALUES (?, ?, 'My Book')").run(id, uid), ownBook(id, uid)) : null);
 const ownImage = (id, uid) => db.prepare('SELECT * FROM images WHERE id = ? AND user_id = ?').get(id, uid);
 const ownPassage = (id, uid) => db.prepare('SELECT * FROM passages WHERE id = ? AND user_id = ?').get(id, uid);
 
@@ -109,7 +110,7 @@ export function bookRoutes(app) {
     res.sendFile(path.resolve(b.cover_path));
   });
   app.get('/api/books/:id', requireUser, (req, res) => {
-    const b = ownBook(req.params.id, req.user.id);
+    const b = ensureBook(req.params.id, req.user.id);
     if (!b) return bad(res, 'Book not found', 404);
     const images = db.prepare(`SELECT i.id, i.status, i.error, i.page_number AS page, i.created_at AS createdAt, (SELECT substr(group_concat(p.text, ' '), 1, 140) FROM passages p WHERE p.image_id = i.id) AS excerpt, (SELECT COUNT(*) FROM passages p WHERE p.image_id = i.id) AS passageCount, (SELECT COUNT(*) FROM passages p WHERE p.image_id = i.id AND (p.highlighted = 1 OR p.important = 1)) AS highlightCount FROM images i WHERE i.book_id = ? ORDER BY i.created_at DESC, i.rowid DESC`).all(b.id);
     const highlights = db.prepare(`SELECT p.id, p.text, p.highlight_text AS highlightText, p.mark_type AS markType, p.important, p.image_id AS imageId, i.page_number AS page FROM passages p JOIN images i ON i.id = p.image_id WHERE p.book_id = ? AND (p.highlighted = 1 OR p.important = 1) ORDER BY i.created_at DESC, p.idx`).all(b.id);
@@ -118,18 +119,20 @@ export function bookRoutes(app) {
   });
 
   // ---------- images ----------
-  app.post('/api/books/:id/images', requireUser, upload.array('images', 40), (req, res) => {
-    const b = ownBook(req.params.id, req.user.id);
+  app.post('/api/books/:id/images', requireUser, upload.array('images', 40), async (req, res) => {
+    const b = ensureBook(req.params.id, req.user.id);
     if (!b) { (req.files || []).forEach((f) => rm(f.path)); return bad(res, 'Book not found', 404); }
     if (!req.files?.length) return bad(res, 'No valid images received');
     const page = parseInt(req.body.page, 10);
-    const out = req.files.map((f) => {
+    const out = [];
+    for (const f of req.files) {
       const id = crypto.randomUUID();
       db.prepare('INSERT INTO images (id,user_id,book_id,path,mime,original_name,page_number) VALUES (?,?,?,?,?,?,?)')
         .run(id, req.user.id, b.id, f.path, f.mimetype, f.originalname, Number.isFinite(page) && req.files.length === 1 ? page : null);
-      enqueue(id);
-      return { id, name: f.originalname };
-    });
+      if (process.env.VERCEL) { try { await processImage(id); } catch (e) { console.error('OCR failed:', e); } }
+      else enqueue(id);
+      out.push({ id, name: f.originalname });
+    }
     ok(res, { images: out });
   });
   app.get('/api/images/:id/file', requireUser, (req, res) => {
@@ -211,8 +214,7 @@ export function bookRoutes(app) {
       const marked = lines.filter((l) => l.mark);
       db.prepare('UPDATE passages SET lines = ?, highlighted = ?, mark_type = ?, highlight_text = ? WHERE id = ?').run(
         JSON.stringify(lines), marked.length / lines.length >= 0.3 ? 1 : 0,
-        marked.length ? (marked.find((l) => l.mark === 'manual') ? 'manual' : marked[0].mark) : null,
-        marked.length ? marked.map((l) => l.text).join(' ') : null, p.id);
+        marked.length ? (marked.find((l) => l.mark === 'manual') ? 'manual' : marked[0].mark) : null, marked.length ? marked.map((l) => l.text).join(' ') : null, p.id);
     }
     ok(res, { touched });
   });
@@ -227,8 +229,7 @@ export function bookRoutes(app) {
       const t = text.replace(/\s+/g, ' ').trim();
       if (!t) return bad(res, 'Text cannot be empty');
       const { vec, model } = await embed(t);
-      db.prepare('UPDATE passages SET text = ?, corrected = ?, embedding = ?, embed_model = ? WHERE id = ?')
-        .run(t, t === p.original_text ? 0 : 1, toBlob(vec), model, p.id);
+      db.prepare('UPDATE passages SET text = ?, corrected = ?, embedding = ?, embed_model = ? WHERE id = ?').run(t, t === p.original_text ? 0 : 1, toBlob(vec), model, p.id);
       ftsPut(p.id, req.user.id, t);
     }
     ok(res);
@@ -249,8 +250,7 @@ export function bookRoutes(app) {
       book = i.book_id;
     } else if (!bookId || !ownBook(bookId, req.user.id)) return bad(res, 'Book not found', 404);
     const id = crypto.randomUUID();
-    db.prepare('INSERT INTO notes (id,user_id,book_id,image_id,passage_id,content) VALUES (?,?,?,?,?,?)')
-      .run(id, req.user.id, book, image || null, passageId || null, String(content).trim());
+    db.prepare('INSERT INTO notes (id,user_id,book_id,image_id,passage_id,content) VALUES (?,?,?,?,?,?)').run(id, req.user.id, book, image || null, passageId || null, String(content).trim());
     ok(res, { id });
   });
   app.delete('/api/notes/:id', requireUser, (req, res) => {
