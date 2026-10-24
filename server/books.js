@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { db, DATA_DIR, UPLOAD_DIR, ftsPut, ftsDelete } from './db.js';
 import { requireUser } from './auth.js';
-import { enqueue, processImage } from './ocr.js';
+import { enqueue } from './ocr.js';
 import { lookupBooks } from './metadata.js';
 import { embed, toBlob } from './embed.js';
 import { ok, bad, rm } from './util.js';
@@ -129,8 +129,7 @@ export function bookRoutes(app) {
       const id = crypto.randomUUID();
       db.prepare('INSERT INTO images (id,user_id,book_id,path,mime,original_name,page_number) VALUES (?,?,?,?,?,?,?)')
         .run(id, req.user.id, b.id, f.path, f.mimetype, f.originalname, Number.isFinite(page) && req.files.length === 1 ? page : null);
-      if (process.env.VERCEL) { try { await processImage(id); } catch (e) { console.error('OCR failed:', e); } }
-      else enqueue(id);
+      enqueue(id);
       out.push({ id, name: f.originalname });
     }
     ok(res, { images: out });
