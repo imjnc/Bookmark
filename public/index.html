@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem('bm-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<title>Bookmark</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;520;560;620;650;680;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header id="mbar"></header>
+<div class="shell out" id="shell">
+  <aside id="top" aria-label="Main"></aside>
+  <main id="app" aria-live="polite"></main>
+</div>
+<div id="toasts" role="status"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
