@@ -1,10 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const DATA_DIR = process.env.BOOKMARK_DATA || path.join(root, 'data');
+export const DATA_DIR = process.env.BOOKMARK_DATA || (process.env.VERCEL ? path.join(os.tmpdir(), 'bookmark-data') : path.join(root, 'data'));
+fs.mkdirSync(DATA_DIR, { recursive: true });
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 

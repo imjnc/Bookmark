@@ -29,9 +29,14 @@ app.use(express.static(path.join(here, '..', 'public')));
 app.use('/api', (_req, res) => bad(res, 'Not found', 404));
 app.use((err, _req, res, _next) => { console.error(err); bad(res, err.message || 'Server error', 500); });
 
-const port = Number(process.env.PORT) || 3000;
-const server = app.listen(port, () => {
-  console.log(`Bookmark running at http://localhost:${port}`);
-  resumePending();
-});
-process.on('SIGINT', async () => { await shutdownOcr(); server.close(); process.exit(0); });
+export default app;
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMain && !process.env.VERCEL) {
+  const port = Number(process.env.PORT) || 3000;
+  const server = app.listen(port, () => {
+    console.log(`Bookmark running at http://localhost:${port}`);
+    resumePending();
+  });
+  process.on('SIGINT', async () => { await shutdownOcr(); server.close(); process.exit(0); });
+}
